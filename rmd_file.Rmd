@@ -1,0 +1,125 @@
+---
+title: "Practical Machine Learning - Prediction Project"
+output: html_document
+---
+***
+
+## Introduction
+
+The purpose of this project is predicting the quality of the exercise from several athletes. The raw data has been obtained from 
+the **[Human Activity Recognition](http://groupware.les.inf.puc-rio.br/har)** project and includes two data sets: a [training](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) dataset and a [testing](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) dataset. In this project, several athletes did an exercise in 5 different ways, being just one of them the correct one to perform the exercise. The two datasets have several variables that we can be used to predict the variable `classe`, representing different types of exercises (denoted  `A`, `B`, `C`, and `D` in the testing dataset). The ultimate objective of this project is to predict the variable `classe` for each of the 20 observations included in the testing dataset.
+
+## Data processing
+
+The two datasets are loaded into the variables `testing` and `training`. 
+
+```{r}
+library(caret)
+library(corrplot)
+
+testing <- read.csv("pml-testing.csv")
+training <- read.csv("pml-training.csv")
+```
+
+The training datasets contains 19,662 observations and 160 variables.
+
+```{r}
+dim(training)
+``` 
+
+By exploring the training dataset, we can realize that many of the variables have either `NA` or no values. Then, we skip the variables with many entries of such kind. Also, we need to exclude the first 7 variables, since they contain useless info for prediction purposes, resulting in a new  training dataset with 53 variables (the outcome variable `classe` is one of them).
+
+```{r}
+training[training==""] <- NA
+col_NA <- rep(FALSE, ncol(training))
+
+for (i in 1:ncol(training)) {
+    if(sum(is.na(training[,i])) > 50) {
+        col_NA[i] <- TRUE
+    }
+}
+
+training_filter_na <- training[,!col_NA]
+training_filter_na <- training_filter_na[,-1:-7]
+
+dim(training_filter_na)
+``` 
+
+## Cross validation dataset
+
+For cross-validation purposes, the obtained training dataset into two sub-datasets: a training one, containing 70% of the observations that is used to generate the model, and another one, with 30% of the observations, for a further cross-validation step. The aim of the cross-validation step is to assess the accuracy of the prediction model designed with the training dataset.
+
+```{r}
+set.seed(145)
+training_index <- createDataPartition(training_filter_na$classe, p=0.7, list=FALSE)
+
+training_filter_na_2 <- training_filter_na[training_index,]
+cross_validation <- training_filter_na[-training_index,]
+``` 
+
+## Correlation inspection
+
+We analyze the correlation between the 53 variables in the training dataset. Variables with a strong correlation with others hardly contribute to improve the predictor's performance and may cause overfitting. Therefore, these variables need to be excluded.
+
+```{r}
+correlation <- cor(training_filter_na_2[,-dim(training_filter_na_2)[2]],)
+corrplot(correlation, method="color", type="lower", order="hclust", tl.cex=0.75, tl.col="black", tl.srt=45)
+``` 
+
+The figure above shows graphically the correlation --with a dark color representing a high correlation-- between the 53 variables. Variables with a absolute correlation over 0.5 with other variables are identified and skipped.
+
+```{r}
+correlation_high <- findCorrelation(correlation, cutoff=0.5)
+training_filter_na_corr_2 <- training_filter_na_2[,-correlation_high]
+``` 
+
+The final training dataset has 22 variables (the outcome variable `classe` is one of them).
+
+```{r}
+dim(training_filter_na_corr_2)
+```
+
+## Training
+
+We have designed a prediction model based on Random Forests. The Random Forests algorithm builds a lot of trees and average them to reduce the variance. We have applied the cross validation method --with very low impact on accuracy.
+
+```{r}
+library(randomForest)
+
+set.seed(57)
+options <- trainControl(method="cv", number=2, allowParallel=TRUE)
+model <- modFit_sub <- train(classe~., method="rf", data=training_filter_na_corr_2, trControl=options, importance=TRUE)
+model
+```
+
+We can analyze the influence of the variables on the prediction model through a Variable Importance plot.
+
+```{r}
+varImpPlot(model$finalModel, main="Influence of variables on the fit model", pch=19, col="blue",cex=0.75, sort=TRUE)
+``` 
+
+## Cross validation
+
+The model is tested upon the cross-validation dataset, so we can evaluate the model's accuracy by comparing the predicted outcomes against the actual ones. The model exhibits an accuracy of 98.4%; thus, the out-of-sample error turns out to be 1.6%.
+
+```{r}
+pred_cv <- predict(model, newdata=cross_validation)
+
+conf_mat <- confusionMatrix(pred_cv, cross_validation$classe)
+conf_mat$table
+
+accuracy <- conf_mat$overall[1]
+accuracy
+``` 
+
+## Predictions on the testing dataset
+
+Finally, we apply the model on the testing dataset.
+
+```{r}
+testing_prediction <- predict(model, newdata=testing)
+testing_prediction
+```
+
+## Conclusions
+We have designed a prediction model based on Random Forests. When applying the algorithm to a cross-validation dataset reaching an out-of-sample error of 1.6%. The algorithm has been run on the provided testing dataset and all the predictions are correct.
